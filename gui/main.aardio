@@ -1,0 +1,401 @@
+// main.aardio — libcimbar GUI 主程序
+// 两个标签页：编码(文件→帧显示) | 解码(摄像头扫描→保存)
+
+import win.ui
+import win.ui.menu
+import win.ui.statusbar
+import gdip
+import gdip.graphics
+import string
+import math
+
+// 业务模块
+import gui.libcimbar_dll
+import gui.encoder
+import gui.decoder
+import gui.camera
+
+// ================================================================
+// 创建主窗口
+// ================================================================
+var mainForm = win.form(
+    text = "libcimbar GUI — Cimbar 码编码/解码";
+    right = 980;
+    bottom = 720;
+    border = "resizable";
+    min = 800:600;
+)
+
+mainForm.add(
+    tabStrip = {cls="tabs";left=0;top=0;right=980;bottom=28;edge=1};
+)
+
+// ================================================================
+// 编码标签页
+// ================================================================
+var pageEncode = mainForm.tabStrip.addPage("编码")
+
+pageEncode.add(
+    // 工具栏
+    btnSelectFile = {cls="button";text="选择文件...";left=12;top=40;right=100;bottom=65;flat=1};
+    lblMode = {cls="static";text="模式:";left=115;top=44;right=150;bottom=62};
+    cmbMode = {cls="combobox";left=152;top=40;right=260;bottom=65;style=0x3/*CBS_DROPDOWNLIST*/};
+    lblComp = {cls="static";text="压缩:";left=275;top=44;right=310;bottom=62};
+    txtCompression = {cls="edit";text="16";left=312;top=42;right=345;bottom=63;num=1};
+    lblFps = {cls="static";text="FPS: 15";left=370;top=44;right=430;bottom=62};
+    trackFps = {cls="trackbar";left=435;top=40;right=585;bottom=65;min=5;max=25;pos=15};
+    lblFpsVal = {cls="static";text="15";left=590;top=44;right=615;bottom=62};
+    btnReset = {cls="button";text="重置";left=630;top=40;right=690;bottom=65;flat=1};
+
+    // 帧显示区域
+    picFrame = {cls="plus";left=12;top=75;right=968;bottom=590;edge=1;bgcolor=0xFF1A1A2E};
+
+    // 进度和状态栏
+    progEncode = {cls="progress";left=12;top=600;right=968;bottom=620};
+    txtEncodeStatus = {cls="static";text="就绪 — 请选择要编码的文件";
+        left=12;top=625;right=800;bottom=650;autoResize=false;color=0xFFAAAAAA};
+    lblFrameInfo = {cls="static";text="";left=700;top=625;right=968;bottom=650;align="right";autoResize=false};
+)
+
+// 模式下拉框选项
+pageEncode.cmbMode.items = {
+    "B   (1024×1024, ~7.5KB/帧) — 默认推荐";
+    "Bm  (1024×720,  ~5.2KB/帧)";
+    "Bu  (736×637,   ~4.0KB/帧)";
+    "4C  (1024×1024, ~5.6KB/帧) — 4色兼容"
+}
+pageEncode.cmbMode.selIndex = 1
+
+// 定时器
+var _frameTimer = null
+var _frameTimerId = null
+
+// --- 事件：选择文件 ---
+pageEncode.btnSelectFile.oncommand = function(){
+    import fsys.dlg
+    var path = fsys.dlg.open(
+        "所有文件|*.*||",
+        "选择要编码的文件",
+        , mainForm.hwnd
+    )
+    if(!path) return
+
+    // 停止当前轮播
+    if(_frameTimer){
+        mainForm.clearInterval(_frameTimerId)
+        _frameTimer = null
+    }
+
+    // 解析模式值
+    var modeVals = {68, 67, 66, 4}
+    var mode = modeVals[pageEncode.cmbMode.selIndex]
+    var comp = ..tonumber(pageEncode.txtCompression.text)
+    if(!comp) comp = 16
+    if(comp < 0) comp = 0
+    if(comp > 22) comp = 22
+
+    pageEncode.progEncode.pos = 0
+    pageEncode.txtEncodeStatus.text = "正在编码 " ++ ..io.splitpath(path).file ++ ..io.splitpath(path).ext ++ " ..."
+
+    // 在界面刷新后再执行编码（避免 UI 卡顿）
+    mainForm.setTimeout(function(){
+        var n = gui.encoder.encodeFile(path, mode, comp)
+        if(n <= 0){
+            pageEncode.txtEncodeStatus.text = "编码失败！"
+            return
+        }
+
+        pageEncode.progEncode.pos = 100
+        pageEncode.txtEncodeStatus.text = "编码完成 — " ++ ..io.splitpath(path).name
+        pageEncode.lblFrameInfo.text = "共 " ++ n ++ " 帧"
+
+        // 启动轮播
+        startFrameCarousel()
+    }, 100)
+}
+
+// FPS 滑块
+pageEncode.trackFps.oncommand = function(){
+    var fps = pageEncode.trackFps.pos
+    pageEncode.lblFps.text = "FPS: " ++ fps
+    pageEncode.lblFpsVal.text = ..tostring(fps)
+
+    // 如果正在轮播，调整定时器间隔
+    if(_frameTimer){
+        mainForm.clearInterval(_frameTimerId)
+        startFrameCarousel()
+    }
+}
+
+// 重置按钮
+pageEncode.btnReset.oncommand = function(){
+    if(_frameTimer){
+        mainForm.clearInterval(_frameTimerId)
+        _frameTimer = null
+    }
+    gui.encoder.reset()
+    pageEncode.picFrame.repaint()
+    pageEncode.progEncode.pos = 0
+    pageEncode.txtEncodeStatus.text = "就绪 — 请选择要编码的文件"
+    pageEncode.lblFrameInfo.text = ""
+}
+
+// 帧轮播
+startFrameCarousel = function(){
+    if(_frameTimer){
+        mainForm.clearInterval(_frameTimerId)
+    }
+    var fps = pageEncode.trackFps.pos
+    var interval = ..math.floor(1000 / fps)
+
+    _frameTimerId = mainForm.setInterval(
+        function(){
+            var bmp, idx, total = gui.encoder.getCurrentBitmap()
+            if(bmp){
+                // 等比缩放适配 plus 控件
+                var rc = pageEncode.picFrame.getRect()
+                var cw = rc.width()
+                var ch = rc.height()
+
+                var imgW = bmp.width
+                var imgH = bmp.height
+                var scale = ..math.min(cw / imgW, ch / imgH)
+                var dw = ..math.floor(imgW * scale)
+                var dh = ..math.floor(imgH * scale)
+                var dx = ..math.floor((cw - dw) / 2)
+                var dy = ..math.floor((ch - dh) / 2)
+
+                // 绘到 plus 控件
+                var g = gdip.graphics(pageEncode.picFrame)
+                g.fillRectangle(0xFF1A1A2E, 0, 0, cw, ch) // 背景
+                g.drawImage(bmp, dx, dy, dw, dh)
+                // 绘制帧编号
+                var info = "帧 " ++ idx ++ " / " ++ total
+                g.drawString(info, 10, ch - 25, cw - 20, 20,
+                    gdip.string.align.left, gdip.string.align.near,
+                    gdip.font("Microsoft YaHei", 11), gdip.solidBrush(0xCC00FF00))
+                g.destroy()
+            }
+        }, interval
+    )
+}
+
+// ================================================================
+// 解码标签页
+// ================================================================
+var pageDecode = mainForm.tabStrip.addPage("解码")
+
+pageDecode.add(
+    // 工具栏
+    btnStartScan = {cls="button";text="开始扫描";left=12;top=40;right=95;bottom=65;flat=1};
+    btnStopScan = {cls="button";text="停止";left=100;top=40;right=145;bottom=65;flat=1;disabled=1};
+    lblDecMode = {cls="static";text="模式:";left=160;top=44;right=195;bottom=62};
+    cmbDecMode = {cls="combobox";left=197;top=40;right=325;bottom=65;style=0x3};
+    chkAutoMode = {cls="checkbox";text="自动检测";left=340;top=44;right=420;bottom=60;checked=1};
+    lblCamInfo = {cls="static";text="摄像头: 0";left=440;top=44;right=600;bottom=62;autoResize=false};
+
+    // 预览 + 锚点区域
+    picCamera = {cls="plus";left=12;top=75;right=968;bottom=570;edge=1;bgcolor=0xFF111122};
+
+    // 进度条
+    progDecode = {cls="progress";left=12;top=580;right=968;bottom=600};
+
+    // 状态栏
+    txtDecStatus = {cls="static";text="就绪 — 点击"开始扫描"启动摄像头解码";
+        left=12;top=605;right=700;bottom=635;autoResize=false;color=0xFFAAAAAA};
+    lblDecInfo = {cls="static";text="";left=700;top=605;right=968;bottom=635;align="right";autoResize=false};
+)
+
+pageDecode.cmbDecMode.items = {
+    "B  (1024×1024)";
+    "Bm (1024×720)";
+    "Bu (736×637)";
+    "4C (1024×1024, 4色)"
+}
+pageDecode.cmbDecMode.selIndex = 1
+
+// 解码状态
+var _decoding = false
+var _anchorState = "idle"  // idle | scanning | active
+var _decodeTimerId = null
+var _decodeScanId = null
+
+// --- 事件：锚点绘制（onDraw 回调） ---
+pageDecode.picCamera.onDrawContent = function(graphics, rc){
+    if(!_decoding) return
+
+    var cw = rc.width()
+    var ch = rc.height()
+
+    // 模式宽高比
+    var modeAspects = {1.0, 1.413, 1.1516, 1.0}
+    var idx = pageDecode.cmbDecMode.selIndex
+    var aspect = modeAspects[idx]
+
+    // 在控件中居中显示
+    var imgW, imgH
+    if(cw / ch > aspect){
+        imgH = ch; imgW = ..math.floor(ch * aspect)
+    } else {
+        imgW = cw; imgH = ..math.floor(cw / aspect)
+    }
+    var ox = ..math.floor((cw - imgW) / 2)
+    var oy = ..math.floor((ch - imgH) / 2)
+
+    // 锚点颜色随状态
+    var color
+    select(_anchorState){
+        case "scanning" { color = 0xFFEECC00 } // 黄色=检测到码
+        case "active"   { color = 0xFF00FF00 } // 绿色=解码中
+        else            { color = 0xAA888888 } // 灰色=待机
+    }
+    var pen = gdip.pen(color, 3)
+    var len = 40    // L 形线长
+    var gap = 5     // 与外框间距
+
+    // 左上角
+    graphics.drawLine(pen, ox + gap, oy + gap + len, ox + gap, oy + gap)
+    graphics.drawLine(pen, ox + gap, oy + gap, ox + gap + len, oy + gap)
+    // 右上角
+    graphics.drawLine(pen, ox + imgW - gap, oy + gap, ox + imgW - gap - len, oy + gap)
+    graphics.drawLine(pen, ox + imgW - gap, oy + gap, ox + imgW - gap, oy + gap + len)
+    // 左下角
+    graphics.drawLine(pen, ox + gap, oy + imgH - gap, ox + gap + len, oy + imgH - gap)
+    graphics.drawLine(pen, ox + gap, oy + imgH - gap, ox + gap, oy + imgH - gap - len)
+    // 右下角
+    graphics.drawLine(pen, ox + imgW - gap, oy + imgH - gap, ox + imgW - gap - len, oy + imgH - gap)
+    graphics.drawLine(pen, ox + imgW - gap, oy + imgH - gap, ox + imgW - gap, oy + imgH - gap - len)
+
+    pen.destroy()
+}
+
+// --- 事件：开始扫描 ---
+pageDecode.btnStartScan.oncommand = function(){
+    if(_decoding) return
+
+    var modeVals = {68, 67, 66, 4}
+    var mode = pageDecode.chkAutoMode.checked ? 0 : modeVals[pageDecode.cmbDecMode.selIndex]
+    if(mode == 0) mode = 68  // Auto 先按 B 配置（实际切换待后续优化）
+
+    gui.decoder.init(mode)
+    _decoding = true
+    _anchorState = "idle"
+
+    pageDecode.btnStartScan.disabled = true
+    pageDecode.btnStopScan.disabled = false
+    pageDecode.progDecode.pos = 0
+    pageDecode.txtDecStatus.text = "正在启动摄像头..."
+    pageDecode.lblDecInfo.text = ""
+
+    // 启动摄像头
+    gui.camera.start(0, function(imgData, w, h){
+        if(!_decoding) return
+
+        // 预览画面到 plus 控件
+        var bmp = gdip.bitmap(w, h, 24)
+
+        // 将 BGR 数据转为 gdip.bitmap（逐行填充）
+        var g = gdip.graphics(bmp)
+        for(y=0; h-1; 1){
+            var rowOffset = y * w * 3
+            for(x=0; w-1; 1){
+                var i = rowOffset + x * 3
+                var b = ..raw.getbyte(imgData, i)
+                var g2 = ..raw.getbyte(imgData, i + 1)
+                var r = ..raw.getbyte(imgData, i + 2)
+                g.setPixel(x, y, gdip.pixel(r, g2, b))
+            }
+        }
+        g.destroy()
+
+        // 缩放绘制到 picCamera 控件
+        var rc = pageDecode.picCamera.getRect()
+        var cw2 = rc.width()
+        var ch2 = rc.height()
+        var scale = ..math.min(cw2 / w, ch2 / h)
+        var dw = ..math.floor(w * scale)
+        var dh = ..math.floor(h * scale)
+        var dx = ..math.floor((cw2 - dw) / 2)
+        var dy = ..math.floor((ch2 - dh) / 2)
+
+        var g2 = gdip.graphics(pageDecode.picCamera)
+        g2.fillRectangle(0xFF111122, 0, 0, cw2, ch2)
+        g2.drawImage(bmp, dx, dy, dw, dh)
+        g2.destroy()
+
+        bmp.destroy()
+
+        // 解码处理（使用原始 imgData 避免缩放失真）
+        // 由于逐像素 setPixel 太慢，这里先用缩放后的场景替代；
+        // 生产环境下建议用 SetDIBitsToDevice 直接渲染 BGR raw buffer。
+        // 这里仅演示解码流程。
+
+        // 注：实际解码需用原始分辨率数据。
+        // 当前 directShow 回调传递的 imgData 即原始 BGR 数据。
+        var hit = gui.decoder.processFrame(imgData, w, h)
+
+        if(hit){
+            if(gui.decoder.isCompleted()){
+                _anchorState = "active"
+            } else {
+                _anchorState = "scanning"
+            }
+        } else {
+            _anchorState = "idle"
+        }
+
+        pageDecode.progDecode.pos = gui.decoder.getProgress()
+
+        if(gui.decoder.isCompleted()){
+            // 自动保存到桌面
+            var desktop = ..win.getenv("USERPROFILE") ++ "\\Desktop\\"
+            var savedPath = gui.decoder.saveDecoded(desktop)
+            if(savedPath){
+                pageDecode.txtDecStatus.text = "解码完成！已保存至: " ++ savedPath
+                pageDecode.txtDecStatus.color = 0xFF00AA00
+                pageDecode.lblDecInfo.text = "100%"
+                // 自动停止
+                pageDecode.btnStopScan.oncommand()
+            }
+        } else {
+            var pct = gui.decoder.getProgress()
+            pageDecode.txtDecStatus.text = "扫描中... 命中 " ++ gui.decoder.getHitFrames() ++ " 帧"
+            pageDecode.lblDecInfo.text = ..tostring(pct) ++ "%"
+        }
+    })
+
+    pageDecode.txtDecStatus.text = "扫描中... 请将帧图像对准摄像头"
+}
+
+// --- 事件：停止扫描 ---
+pageDecode.btnStopScan.oncommand = function(){
+    gui.camera.stop()
+    gui.decoder.reset()
+    _decoding = false
+    _anchorState = "idle"
+
+    pageDecode.btnStartScan.disabled = false
+    pageDecode.btnStopScan.disabled = true
+    pageDecode.progDecode.pos = 0
+    pageDecode.txtDecStatus.text = "已停止"
+    pageDecode.lblDecInfo.text = ""
+    pageDecode.picCamera.repaint()
+}
+
+// ================================================================
+// 显示窗口
+// ================================================================
+mainForm.show()
+mainForm.tabStrip.selIndex = 1
+
+// 窗口关闭时清理
+mainForm.onClose = function(){
+    if(_decoding){
+        gui.camera.stop()
+    }
+    if(_frameTimer){
+        mainForm.clearInterval(_frameTimerId)
+    }
+}
+
+win.loopMessage()

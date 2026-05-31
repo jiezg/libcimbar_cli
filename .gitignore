@@ -1,0 +1,47 @@
+# 构建工具链（数百 MB，不应入库）
+.tools/
+
+# 构建产物目录
+build/
+dist_green/
+dist32_green/
+dist/
+
+# 编译中间文件
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.lib
+*.so
+*.dylib
+
+# CMake 生成文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE / 编辑器
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 压缩包
+*.zip
+*.7z
+*.rar
+*.tar.gz
+
+# Python 缓存
+__pycache__/
+*.pyc
