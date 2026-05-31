@@ -1,4 +1,4 @@
-# libcimbar Windows 移植版
+# libcimbar Windows 移植
 
 [![License](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.9.0-orange.svg)](https://github.com/sz3/libcimbar)
@@ -76,66 +76,6 @@ libcimbar 使用 Fountain 码（无率纠删码）作为编码核心：
 ## libcimbar.dll API
 
 所有导出函数使用 C 调用约定（`extern "C"`），头文件参见 [libcimbar_export.h](src/dll/libcimbar_export.h)。
-
-### 编码流程（伪代码）
-
-```c
-// 1. 配置
-cimbar_encode_configure(68, 16);    // Mode B, zstd 16
-
-// 2. 初始化编码会话
-cimbar_encode_init("myfile.txt", 10, -1);
-
-// 3. 分块喂入数据
-int chunk = cimbar_encode_chunk_size();
-char buf[chunk];
-while (read_from_file(buf, chunk, &actual)) {
-    cimbar_encode_feed((unsigned char*)buf, actual);
-}
-
-// 4. 生成帧图像
-int w = cimbar_encode_image_width();
-int h = cimbar_encode_image_height();
-unsigned char* frame = malloc(w * h * 3);
-while (cimbar_encode_next_frame(frame, w*h*3) > 0) {
-    save_as_png(frame, w, h);  // BGR 格式像素
-}
-free(frame);
-```
-
-### 解码流程（伪代码）
-
-```c
-// 1. 配置
-cimbar_decode_configure(68);
-
-// 2. 分配 scan 缓冲区
-int scanBufSize = cimbar_decode_bufsize();
-unsigned char* scanBuf = malloc(scanBufSize);
-
-// 3. 逐帧处理
-for each frame image {
-    unsigned char* pixels = load_image("frame_X.png", &w, &h);
-    
-    int bytes = cimbar_decode_scan(pixels, w, h, 3, scanBuf, scanBufSize);
-    if (bytes <= 0) continue;
-    
-    int64_t fid = cimbar_decode_fountain(scanBuf, bytes);
-    if (fid > 0) {  // 解码完成
-        char fname[256];
-        cimbar_decode_filename((uint32_t)fid, fname, sizeof(fname));
-        
-        FILE* out = fopen(fname, "wb");
-        unsigned char readBuf[65536];
-        int n;
-        while ((n = cimbar_decode_read((uint32_t)fid, readBuf, sizeof(readBuf))) > 0)
-            fwrite(readBuf, 1, n, out);
-        fclose(out);
-        break;
-    }
-}
-free(scanBuf);
-```
 
 ## 目录结构
 
