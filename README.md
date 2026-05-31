@@ -3,13 +3,12 @@
 [![License](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.9.0-orange.svg)](https://github.com/sz3/libcimbar)
 
-基于 [sz3/libcimbar](https://github.com/sz3/libcimbar) 的 Windows 平台移植与二次开发。将原项目编译为 **DLL 动态链接库**，并提供 **CLI 命令行工具** 和 **aardio GUI 图形界面**，方便在 Windows 环境下集成和使用。
+基于 [sz3/libcimbar](https://github.com/sz3/libcimbar) 的 Windows 平台移植与二次开发。将原项目编译为 **DLL 动态链接库**，并提供 **CLI 命令行工具**，方便在 Windows 环境下集成和使用。
 
 ## 功能特性
 
-- **libcimbar.dll** — C 接口动态库，可从 C/C++/C#/Python/aardio 等任意语言调用
+- **libcimbar.dll** — C 接口动态库，可从 C/C++/C#/Python 等任意语言调用
 - **libcimbar_cli.exe** — 命令行工具，一键编码/解码 cimbar 帧图像
-- **aardio GUI** — 图形界面（编码 + 摄像头扫码解码），开箱即用
 - **绿色部署** — 无需安装任何依赖，拷贝目录即可运行
 
 ## 快速开始
@@ -155,12 +154,6 @@ libcimbar_cli/
 │   └── cli/                # libcimbar_cli.exe 源码
 │       ├── CMakeLists.txt
 │       └── libcimbar_cli.cpp
-└── gui/                    # aardio 图形界面
-    ├── main.aardio         # 主窗口
-    ├── encoder.aardio      # 编码逻辑
-    ├── decoder.aardio      # 解码逻辑
-    ├── camera.aardio       # 摄像头采集
-    └── libcimbar_dll.aardio # DLL 接口封装
 ```
 
 ## 构建指南
@@ -200,4 +193,3 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 - 原始项目: [sz3/libcimbar](https://github.com/sz3/libcimbar) — Color Icon Matrix Barcode
 - OpenCV: [opencv/opencv](https://github.com/opencv/opencv)
-- aardio: [aardio](https://www.aardio.com/) — 国产桌面开发工具
