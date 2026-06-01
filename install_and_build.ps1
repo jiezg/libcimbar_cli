@@ -1,4 +1,5 @@
 # install_and_build.ps1 — libcimbar_cli 一键下载依赖 + 编译 + 绿色打包
+# 由TRAE AI生成，可能因运行环境不一致而发生错误，请自行修正
 # 用法: powershell -ExecutionPolicy Bypass -File install_and_build.ps1
 # 所有依赖均为便携版，无需管理员权限
 
