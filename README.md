@@ -8,12 +8,12 @@
 ## 功能特性
 
 - **libcimbar.dll** — C 接口动态库，可从 C/C++/C#/Python 等任意语言调用
-- **libcimbar_cli.exe** — 命令行工具，一键编码/解码 cimbar 帧图像
-- **绿色部署** — 无需安装任何依赖，拷贝目录即可运行
+- **libcimbar_cli.exe** — 命令行工具，可以编码/解码 cimbar 帧图像
+- **绿色部署** — 无需安装，依赖库文件已随release附带
 
 ## 快速开始
 
-从 [Releases](https://github.com/sz3/libcimbar/releases) 下载 `libcimbar-v0.9.0-win64.zip`，解压后即可使用。
+从 [Releases](https://github.com/sz3/libcimbar/releases) 下载 `libcimbar-vX.X.X-win64.zip`，解压后即可使用。
 
 ### 编码示例
 
